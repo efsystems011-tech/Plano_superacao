@@ -14,7 +14,7 @@ function RotaProtegida() {
     }
 
     // Com usuário: mostra a página que estava dentro dessa rota
-    return <Outlet />
+    return user ? <Outlet /> : <Navigate to="/login" replace />
 
 }
 

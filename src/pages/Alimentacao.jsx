@@ -1,6 +1,7 @@
-import { useState, useEffect, use } from "react"
+import { useState, useEffect } from "react"
 import { supabase } from '../supabaseClient'
-import { buscarAlimentos } from '../api/openFoodFacts'
+import { buscarAlimentos } from '../api/alimentos.Db'
+import { useAuth } from '../AuthContext'
 
 const REFEICOES = [
     { valor: 'cafe', nome: 'Café da manhã' },
@@ -25,6 +26,7 @@ function arredondar(valor) {
 }
 
 function Alimentacao() {
+    const { user } = useAuth()
     const [termo, setTermo] = useState('')
     const [resultados, setResultados] = useState([])
     const [buscando, setBuscando] = useState(false)
@@ -37,27 +39,39 @@ function Alimentacao() {
     const [salvando, setSalvando] = useState(false)
 
     const [registros, setRegistros] = useState([])
-
-    async function carregarRegistros() {
-        const inicio = new Date()
-        inicio.setHours(0, 0, 0, 0)
-
-        const { data, error } = await supabase
-            .from('food_logs')
-            .select('*')
-            .gte('created_at', inicio.toISOString())
-            .order('created_at', { ascending: false })
-
-        if (error) {
-            setErro('Não foi possível carregar suas refeições.')
-        } else {
-            setRegistros(data)
-        }
-    }
+    const [carregandoRegistros, setCarregandoRegistros] = useState(true)
 
     useEffect(() => {
+        let ativo = true
+
+        async function carregarRegistros() {
+            if (!user?.id) return
+
+            const inicio = new Date()
+            inicio.setHours(0, 0, 0, 0)
+
+            const { data, error } = await supabase
+                .from('food_logs')
+                .select('*')
+                .eq('user_id', user.id)
+                .gte('created_at', inicio.toISOString())
+                .order('created_at', { ascending: false })
+
+            if (!ativo) return
+            if (error) {
+                setErro(`Não foi possível carregar suas refeições: ${error.message}`)
+            } else {
+                setErro('')
+                setRegistros(data)
+            }
+            setCarregandoRegistros(false)
+        }
+
         carregarRegistros()
-    }, [])
+        return () => {
+            ativo = false
+        }
+    }, [user])
 
     async function buscar(e) {
         e.preventDefault()
@@ -69,7 +83,7 @@ function Alimentacao() {
             const lista = await buscarAlimentos(termo.trim())
             setResultados(lista)
             setBuscou(true)
-        } catch (err) {
+        } catch {
             setErro('Não foi possível buscar agora. Tente mais tarde.')
         }
         setBuscando(false)
@@ -89,16 +103,21 @@ function Alimentacao() {
         setErro('')
         setSalvando(true)
 
-        const { error } = await supabase.from('food_logs').insert({
-            food_name: selecionado.nome,
-            brand: selecionado.marca || null,
-            grams: g,
-            kcal: arredondar(proporcional(selecionado.kcal, g)),
-            protein_g: arredondar(proporcional(selecionado.proteina, g)),
-            carbs_g: arredondar(proporcional(selecionado.carboidrato, g)),
-            fat_g: arredondar(proporcional(selecionado.gordura, g)),
-            meal_type: refeicao,
-        })
+        const { data: registro, error } = await supabase
+            .from('food_logs')
+            .insert({
+                user_id: user.id,
+                food_name: selecionado.nome,
+                brand: selecionado.marca || null,
+                grams: g,
+                kcal: arredondar(proporcional(selecionado.kcal, g)),
+                protein_g: arredondar(proporcional(selecionado.proteina, g)),
+                carbs_g: arredondar(proporcional(selecionado.carboidrato, g)),
+                fat_g: arredondar(proporcional(selecionado.gordura, g)),
+                meal_type: refeicao,
+            })
+            .select()
+            .single()
         setSalvando(false)
 
         if (error) {
@@ -106,9 +125,9 @@ function Alimentacao() {
             return
         }
 
+        setRegistros((atuais) => [registro, ...atuais])
         setSelecionado(null)
         setGramas('100')
-        carregarRegistros()
     }
 
     async function remover(id) {
@@ -118,7 +137,7 @@ function Alimentacao() {
             setErro('Não foi possível remover.')
             return
         }
-        carregarRegistros()
+        setRegistros((atuais) => atuais.filter((registro) => registro.id !== id))
     }
 
     // Totais do dia
@@ -196,7 +215,9 @@ function Alimentacao() {
                             </div>
                         </div>
 
-                        {registros.length === 0 ? (
+                        {carregandoRegistros ? (
+                            <p className="text-muted mb-0">Carregando refeições...</p>
+                        ) : registros.length === 0 ? (
                             <p className="text-muted mb-0">Nenhum alimento registrado hoje.</p>
                         ) : (
 
@@ -360,7 +381,11 @@ function Alimentacao() {
                     </button>
                 </form>
 
-                {buscou && !!buscando && resultados.length === 0 && (
+                <div>
+                    Fonte dos dados: Tabela Brasileira de Composição de Alimentos (TACO), NEPA/UNICAMP.
+                </div>
+
+                {buscou && !buscando && resultados.length === 0 && (
                     <p className="text-muted">
                         Nenhum resultado com dados nutricionais.
                     </p>
