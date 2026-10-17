@@ -121,7 +121,7 @@ function Alimentacao() {
         setSalvando(false)
 
         if (error) {
-            setErro('Não foi possível salvar.')
+            setErro(`Não foi possível salvar a refeição: ${error.message}`)
             return
         }
 
@@ -134,7 +134,7 @@ function Alimentacao() {
         setErro('')
         const { error } = await supabase.from('food_logs').delete().eq('id', id)
         if (error) {
-            setErro('Não foi possível remover.')
+            setErro(`Não foi possível remover a refeição: ${error.message}`)
             return
         }
         setRegistros((atuais) => atuais.filter((registro) => registro.id !== id))

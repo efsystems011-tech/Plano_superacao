@@ -1,57 +1,83 @@
-import { use, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { supabase } from "../supabaseClient"
 import { useAuth } from "../AuthContext"
 
 function Agua() {
 
     const { user } = useAuth()
+    const userId = user?.id
     const [registros, setRegistros] = useState([])
     const [meta, setMeta] = useState(2000)
     const [metaInput, setMetaImput] = useState('2000')
     const [outroValor, setOutroValor] = useState('')
     const [carregando, setCarregando] = useState(true)
     const [erro, setErro] = useState('')
-
-    async function carregar() {
-        // Inicio do dia de hoje, no horário do seu computador
-        const inicio = new Date()
-        inicio.setHours(0, 0, 0, 0)
-
-        const [resRegistros, resMeta] = await Promise.all([
-            supabase
-                .from('water_logs')
-                .select('id, amount_ml, created_at')
-                .gte('created_at', inicio.toISOString())
-                .order('created_at', { ascending: false }),
-            supabase.from('settings').select('water_goal_ml').maybeSingle(),
-        ])
-
-        if (resRegistros.error || resMeta.error) {
-            setErro('Não foi possivel carregar seus dados.')
-        } else {
-            setRegistros(resRegistros.data)
-            if (resMeta.data) {
-                setMeta(resMeta.data.water_goal_ml)
-                setMetaImput(String(resMeta.data.water_goal_ml))
-            }
-        }
-        setCarregando(false)
-    }
+    const [atualizacao, setAtualizacao] = useState(0)
 
     useEffect(() => {
+        let ativo = true
+
+        async function carregar() {
+            if (!userId) {
+                setCarregando(false)
+                return
+            }
+
+            // Inicio do dia de hoje, no horário do seu computador
+            const inicio = new Date()
+            inicio.setHours(0, 0, 0, 0)
+
+            const [resRegistros, resMeta] = await Promise.all([
+                supabase
+                    .from('water_logs')
+                    .select('id, amount_ml, created_at')
+                    .eq('user_id', userId)
+                    .gte('created_at', inicio.toISOString())
+                    .order('created_at', { ascending: false }),
+                supabase
+                    .from('settings')
+                    .select('water_goal_ml')
+                    .eq('user_id', userId)
+                    .maybeSingle(),
+            ])
+
+            if (!ativo) return
+            if (resRegistros.error || resMeta.error) {
+                const mensagens = [resRegistros.error, resMeta.error]
+                    .filter(Boolean)
+                    .map((erro) => erro.message)
+                    .join(' ')
+                setErro(`Não foi possível carregar seus dados: ${mensagens}`)
+            } else {
+                setErro('')
+                setRegistros(resRegistros.data)
+                if (resMeta.data) {
+                    setMeta(resMeta.data.water_goal_ml)
+                    setMetaImput(String(resMeta.data.water_goal_ml))
+                }
+            }
+            setCarregando(false)
+        }
+
         carregar()
-    }, [])
+        return () => {
+            ativo = false
+        }
+    }, [userId, atualizacao])
 
     async function adicionar(ml) {
+        if (!user?.id) return
+
         setErro('')
         const { error } = await supabase.from('water_logs').insert({
-            amount_ml: ml
+            user_id: user.id,
+            amount_ml: ml,
         })
         if (error) {
-            setErro('Não foi possível salvar.')
+            setErro(`Não foi possível salvar o registro de água: ${error.message}`)
             return
         }
-        carregar()
+        setAtualizacao((valor) => valor + 1)
     }
 
     async function adicionarOutro(e) {
@@ -64,16 +90,22 @@ function Agua() {
 
     async function remover(id) {
         setErro('')
-        const { error } = await supabase.from('water_logs').delete().eq('id', id)
+        const { error } = await supabase
+            .from('water_logs')
+            .delete()
+            .eq('id', id)
+            .eq('user_id', user.id)
         if (error) {
-            setErro('Não foi possível remover.')
+            setErro(`Não foi possível remover o registro de água: ${error.message}`)
             return
         }
-        carregar()
+        setAtualizacao((valor) => valor + 1)
     }
 
     async function salvarMeta(e) {
         e.preventDefault()
+        if (!user?.id) return
+
         const novaMeta = parseInt(metaInput, 10)
         if (!novaMeta || novaMeta <= 0) return
 
@@ -82,9 +114,10 @@ function Agua() {
             .upsert({ user_id: user.id, water_goal_ml: novaMeta })
 
         if (error) {
-            setErro('Não foi possível salvar a meta,')
+            setErro(`Não foi possível salvar a meta: ${error.message}`)
             return
         }
+        setErro('')
         setMeta(novaMeta)
     }
 
