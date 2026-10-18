@@ -83,10 +83,13 @@ function Alimentacao() {
             const lista = await buscarAlimentos(termo.trim())
             setResultados(lista)
             setBuscou(true)
-        } catch {
-            setErro('Não foi possível buscar agora. Tente mais tarde.')
+        } catch (err) {
+            setResultados([])
+            setBuscou(true)
+            setErro(`Não foi possível buscar alimentos: ${err.message}`)
+        } finally {
+            setBuscando(false)
         }
-        setBuscando(false)
     }
 
     function escolher(alimento) {
